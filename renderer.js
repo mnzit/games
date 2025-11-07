@@ -1,5 +1,5 @@
-// Simple top-down endless car racing game
-// Player controls a car that changes lanes to avoid incoming cars.
+// Flappy Bird style game
+// Player controls a bird that must avoid pipes by jumping/flapping
 
 const canvas = document.getElementById('game');
 if (!canvas) throw new Error("Canvas element 'game' not found.");
@@ -10,14 +10,13 @@ let H = canvas.height;
 // Game state
 let running = false;
 let score = 0;
-let speed = 3; // base game speed
 let highScore = 0;
 let animationFrameId = null;
 
-// Road/lane layout
-const lanes = 3;
-let laneWidth = W / lanes;
-let roadMargin = 40;
+// Physics
+const gravity = 0.4;
+const jumpForce = -8;
+const pipeSpeed = 3;
 
 // Responsive canvas sizing (handles DPR and window resize)
 function resizeCanvas() {
@@ -71,67 +70,46 @@ function resizeCanvas() {
 
 // Images (use uploaded assets if available)
 const playerImg = new Image();
-playerImg.src = 'images/player.png';
+playerImg.src = 'images/bird.png'; // Will fallback to colored rectangle if not found
 let playerImgLoaded = false;
 playerImg.addEventListener('load', () => {
     playerImgLoaded = true;
-    // scale player w/h to image aspect ratio while keeping target height
-    // if canvas already resized, use current H-based target, otherwise a sensible default
-    const targetH = Math.max(40, Math.round((H || 480) * 0.14));
+    const targetH = Math.max(30, Math.round((H || 480) * 0.08));
     const aspect = playerImg.naturalWidth / playerImg.naturalHeight || 1;
     player.h = targetH;
     player.w = Math.round(targetH * aspect);
 });
 playerImg.addEventListener('error', () => { playerImgLoaded = false; });
 
-const trafficImg = new Image();
-trafficImg.src = 'images/traffic.png';
-let trafficImgLoaded = false;
-let enemyDefaultW = 40;
-let enemyDefaultH = 70;
-trafficImg.addEventListener('load', () => {
-    trafficImgLoaded = true;
-    // compute default enemy size from image aspect ratio
-    const targetH = Math.max(40, Math.round((H || 480) * 0.14));
-    const aspect = trafficImg.naturalWidth / trafficImg.naturalHeight || 1;
-    enemyDefaultH = targetH;
-    enemyDefaultW = Math.round(targetH * aspect);
-});
-trafficImg.addEventListener('error', () => { trafficImgLoaded = false; });
+// Audio effects
+const flapAudio = new Audio('audio/flap.m4a');
+flapAudio.preload = 'auto';
+let flapAudioLoaded = false;
+flapAudio.addEventListener('canplaythrough', () => { flapAudioLoaded = true; });
+flapAudio.addEventListener('error', () => { flapAudioLoaded = false; });
 
-// Crash audio (play on collision/end)
-const crashAudio = new Audio('audio/crash.m4a');
-crashAudio.preload = 'auto';
-let crashAudioLoaded = false;
-crashAudio.addEventListener('canplaythrough', () => { crashAudioLoaded = true; });
-crashAudio.addEventListener('error', () => { crashAudioLoaded = false; });
+const hitAudio = new Audio('audio/hit.wav');
+hitAudio.preload = 'auto';
+let hitAudioLoaded = false;
+hitAudio.addEventListener('canplaythrough', () => { hitAudioLoaded = true; });
+hitAudio.addEventListener('error', () => { hitAudioLoaded = false; });
 
-// Background audio (looped during gameplay)
-const bgAudio = new Audio('audio/backgroundaudio.mp3');
-bgAudio.preload = 'auto';
-bgAudio.loop = true;
-bgAudio.volume = 0.5;
-let bgAudioLoaded = false;
-bgAudio.addEventListener('canplaythrough', () => { bgAudioLoaded = true; });
-bgAudio.addEventListener('error', () => { bgAudioLoaded = false; });
-
-// Player car
+// Player bird
 const player = {
-    lane: 1, // 0..lanes-1 (start center)
-    x: laneWidth * 1 + laneWidth / 2,
-    y: H - 120,
+    x: W * 0.2,
+    y: H / 2,
     w: 40,
-    h: 70,
-    color: '#0cf'
+    h: 30,
+    velocity: 0,
+    color: '#ff0'
 };
 
-// Enemy cars
-let enemies = [];
+// Pipes
+let pipes = [];
+let pipeGap = 150;
+let pipeWidth = 60;
 let spawnTimer = 0;
-const spawnInterval = 90; // frames
-
-// Road stripe effect
-let stripeOffset = 0;
+const spawnInterval = 100; // frames
 
 // Input movement timing (prevents repeating moves when key is held)
 let lastMoveTime = 0;
@@ -139,47 +117,27 @@ const minMoveInterval = 150; // ms between allowed lane changes
 
 function resetGame() {
     score = 0;
-    speed = 3;
-    enemies = [];
+    pipes = [];
     spawnTimer = 0;
-    stripeOffset = 0;
-    player.lane = 1;
+    player.y = H / 2;
+    player.velocity = 0;
     running = true;
-    // start background audio if available (ignore play errors due to autoplay)
-    try {
-        if (bgAudioLoaded) {
-            bgAudio.currentTime = 0;
-            const p = bgAudio.play();
-            if (p && p.catch) p.catch(() => {});
-        }
-    } catch (e) {
-        // ignore
-    }
-
     if (!animationFrameId) gameLoop();
 }
 
 function endGame() {
     running = false;
-    // play crash sound if available
+    // play hit sound if available
     try {
-        if (crashAudioLoaded) {
-            crashAudio.currentTime = 0;
-            const p = crashAudio.play();
+        if (hitAudioLoaded) {
+            hitAudio.currentTime = 0;
+            const p = hitAudio.play();
             if (p && p.catch) p.catch(() => {});
         }
     } catch (e) {
         // ignore playback errors
     }
-    // stop/pause background audio when game ends
-    try {
-        if (bgAudioLoaded && !bgAudio.paused) {
-            bgAudio.pause();
-            bgAudio.currentTime = 0;
-        }
-    } catch (e) {
-        // ignore
-    }
+
     if (score > highScore) {
         highScore = score;
         if (window.electronAPI && window.electronAPI.setHighScore) {
@@ -188,118 +146,168 @@ function endGame() {
     }
 }
 
-function spawnEnemy() {
-    const lane = Math.floor(Math.random() * lanes);
-    const w = enemyDefaultW;
-    const h = enemyDefaultH;
-    const x = roadMargin + lane * laneWidth + laneWidth / 2;
-    const y = -h - Math.random() * 200;
-    enemies.push({ lane, x, y, w, h, color: '#c33' });
+function spawnPipes() {
+    const gapStart = Math.random() * (H - pipeGap - 100) + 50;
+    pipes.push({
+        x: W,
+        y: gapStart,
+        w: pipeWidth,
+        gapHeight: pipeGap,
+        passed: false
+    });
 }
 
 function update() {
     if (!running) return;
 
-    // score increases with time and speed
-    score += Math.floor(speed / 1.5);
+    // Apply gravity to player
+    player.velocity += gravity;
+    player.y += player.velocity;
 
-    // gradually increase speed
-    if (score % 1000 === 0) speed += 0.2;
+    // Keep player in bounds
+    if (player.y < 0) {
+        player.y = 0;
+        player.velocity = 0;
+    }
+    if (player.y > H - player.h) {
+        player.y = H - player.h;
+        endGame();
+    }
 
-    // update player x to lane center (lane changes handled on keydown)
-    player.x = roadMargin + player.lane * laneWidth + laneWidth / 2;
-
-    // spawn enemies periodically
+    // Spawn pipes
     spawnTimer++;
     if (spawnTimer >= spawnInterval) {
         spawnTimer = 0;
-        spawnEnemy();
+        spawnPipes();
     }
 
-    // update enemies
-    for (let i = enemies.length - 1; i >= 0; i--) {
-        enemies[i].y += speed + 1;
-    // small lateral jitter for variety
-    const laneCenter = roadMargin + enemies[i].lane * laneWidth + laneWidth / 2;
-    enemies[i].x = laneCenter;
-        // remove off-screen
-        if (enemies[i].y > H + 100) enemies.splice(i, 1);
-    }
+    // Update pipes
+    for (let i = pipes.length - 1; i >= 0; i--) {
+        const pipe = pipes[i];
+        pipe.x -= pipeSpeed;
 
-    // collision check (rectangular approximation)
-    for (const e of enemies) {
-        const px = player.x - player.w / 2;
-        const py = player.y - player.h / 2;
-        const ex = e.x - e.w / 2;
-        const ey = e.y - e.h / 2;
-        if (px < ex + e.w && px + player.w > ex && py < ey + e.h && py + player.h > ey) {
-            // collision
+        // Check if player passed pipe
+        if (!pipe.passed && pipe.x + pipe.w < player.x) {
+            pipe.passed = true;
+            score++;
+        }
+
+        // Remove off-screen pipes
+        if (pipe.x + pipe.w < 0) {
+            pipes.splice(i, 1);
+            continue;
+        }
+
+        // Collision detection
+        const birdBox = {
+            x: player.x,
+            y: player.y,
+            w: player.w,
+            h: player.h
+        };
+
+        // Check collision with upper pipe
+        const upperPipe = {
+            x: pipe.x,
+            y: 0,
+            w: pipe.w,
+            h: pipe.y
+        };
+
+        // Check collision with lower pipe
+        const lowerPipe = {
+            x: pipe.x,
+            y: pipe.y + pipe.gapHeight,
+            w: pipe.w,
+            h: H - (pipe.y + pipe.gapHeight)
+        };
+
+        if (checkCollision(birdBox, upperPipe) || checkCollision(birdBox, lowerPipe)) {
             endGame();
             break;
         }
     }
-
-    stripeOffset += speed;
 }
 
-function drawRoad() {
-    // background
-    ctx.fillStyle = '#222';
+function checkCollision(rect1, rect2) {
+    return rect1.x < rect2.x + rect2.w &&
+           rect1.x + rect1.w > rect2.x &&
+           rect1.y < rect2.y + rect2.h &&
+           rect1.y + rect1.h > rect2.y;
+}
+
+function drawBackground() {
+    // White background
+    ctx.fillStyle = '#FFFFFF';
     ctx.fillRect(0, 0, W, H);
-
-    // lanes
-    ctx.fillStyle = '#333';
-    ctx.fillRect(roadMargin, 0, W - roadMargin * 2, H);
-
-    // lane markings
-    ctx.strokeStyle = '#555';
-    ctx.lineWidth = 2;
-    for (let i = 1; i < lanes; i++) {
-        const x = roadMargin + i * laneWidth;
-        ctx.setLineDash([20, 20]);
-        ctx.lineDashOffset = -stripeOffset / 2;
-        ctx.beginPath();
-        ctx.moveTo(x, 0);
-        ctx.lineTo(x, H);
-        ctx.stroke();
-    }
-    ctx.setLineDash([]);
 }
 
 function drawPlayer() {
-    const x = player.x - player.w / 2;
-    const y = player.y - player.h / 2;
+    const x = player.x;
+    const y = player.y;
+    
+    // Rotate bird based on velocity
+    ctx.save();
+    ctx.translate(x + player.w / 2, y + player.h / 2);
+    const rotation = Math.min(Math.max(player.velocity * 0.1, -0.5), 0.5);
+    ctx.rotate(rotation);
+    
     if (playerImgLoaded) {
-        // draw the image centered in the player rect
-        ctx.drawImage(playerImg, x, y, player.w, player.h);
+        ctx.drawImage(playerImg, -player.w / 2, -player.h / 2, player.w, player.h);
     } else {
         ctx.fillStyle = player.color;
-        roundRect(ctx, x, y, player.w, player.h, 6, true, false);
+        ctx.beginPath();
+        ctx.ellipse(-player.w / 2, -player.h / 2, player.w / 2, player.h / 2, 0, 0, Math.PI * 2);
+        ctx.fill();
     }
+    ctx.restore();
 }
 
-function drawEnemies() {
-    for (const e of enemies) {
-        const x = e.x - e.w / 2;
-        const y = e.y - e.h / 2;
-        if (trafficImgLoaded) {
-            ctx.drawImage(trafficImg, x, y, e.w, e.h);
-        } else {
-            ctx.fillStyle = e.color;
-            roundRect(ctx, x, y, e.w, e.h, 6, true, false);
-        }
+function drawPipes() {
+    for (const pipe of pipes) {
+        // Gradient for pipes
+        const gradientUpper = ctx.createLinearGradient(pipe.x, 0, pipe.x + pipe.w, 0);
+        gradientUpper.addColorStop(0, '#FF6B6B');
+        gradientUpper.addColorStop(0.5, '#FF4949');
+        gradientUpper.addColorStop(1, '#FF6B6B');
+        
+        // Pipe body
+        ctx.fillStyle = gradientUpper;
+        
+        // Upper pipe
+        ctx.fillRect(pipe.x, 0, pipe.w, pipe.y);
+        
+        // Lower pipe
+        const lowerPipeY = pipe.y + pipe.gapHeight;
+        ctx.fillRect(pipe.x, lowerPipeY, pipe.w, H - lowerPipeY);
+        
+        // Pipe edges (darker color for depth)
+        ctx.fillStyle = '#E64444';
+        const edgeWidth = 4;
+        
+        // Upper pipe edges
+        ctx.fillRect(pipe.x, pipe.y - edgeWidth, pipe.w, edgeWidth);
+        ctx.fillRect(pipe.x - edgeWidth/2, 0, edgeWidth, pipe.y);
+        ctx.fillRect(pipe.x + pipe.w - edgeWidth/2, 0, edgeWidth, pipe.y);
+        
+        // Lower pipe edges
+        ctx.fillRect(pipe.x, lowerPipeY, pipe.w, edgeWidth);
+        ctx.fillRect(pipe.x - edgeWidth/2, lowerPipeY, edgeWidth, H - lowerPipeY);
+        ctx.fillRect(pipe.x + pipe.w - edgeWidth/2, lowerPipeY, edgeWidth, H - lowerPipeY);
     }
 }
 
 function drawHUD() {
     document.getElementById('score').innerText = score;
-    document.getElementById('speed').innerText = Math.round(speed * 10) / 10;
     document.getElementById('high').innerText = highScore;
+    // Remove speed display since it's not used in Flappy Bird
+    const speedElement = document.getElementById('speed');
+    if (speedElement) speedElement.parentElement.style.display = 'none';
 }
 
 function draw() {
-    drawRoad();
-    drawEnemies();
+    drawBackground();
+    drawPipes();
     drawPlayer();
     drawHUD();
 }
@@ -325,20 +333,34 @@ function roundRect(ctx, x, y, w, h, r, fill, stroke) {
     if (stroke) ctx.stroke();
 }
 
-// Keydown handler: perform a single lane change per key press with debounce
-document.addEventListener('keydown', e => {
-    const now = performance.now();
-    if (now - lastMoveTime < minMoveInterval) return;
-
-    if (e.key === 'ArrowLeft' || e.key.toLowerCase() === 'a') {
-        player.lane = Math.max(0, player.lane - 1);
-        lastMoveTime = now;
+// Handle jump/flap controls
+function jump() {
+    if (!running) {
+        resetGame();
+        return;
     }
-    if (e.key === 'ArrowRight' || e.key.toLowerCase() === 'd') {
-        player.lane = Math.min(lanes - 1, player.lane + 1);
-        lastMoveTime = now;
+    
+    player.velocity = jumpForce;
+    
+    // Play flap sound
+    try {
+        if (flapAudioLoaded) {
+            flapAudio.currentTime = 0;
+            const p = flapAudio.play();
+            if (p && p.catch) p.catch(() => {});
+        }
+    } catch (e) {
+        // ignore playback errors
+    }
+}
+
+document.addEventListener('keydown', e => {
+    if (e.code === 'Space' || e.key === 'ArrowUp' || e.key.toLowerCase() === 'w') {
+        jump();
     }
 });
+
+canvas.addEventListener('click', jump);
 
 document.addEventListener('DOMContentLoaded', () => {
     const restartButton = document.getElementById('restart');
