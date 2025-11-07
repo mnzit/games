@@ -14,6 +14,21 @@ const ctx = canvas.getContext('2d');
 const W = canvas.width;
 const H = canvas.height;
 
+// --- Audio assets -----------------------------------------------------
+// Preload hit sound for brick collisions. Using HTMLAudioElement here is
+// fine in the renderer context (Electron / browser). We reset currentTime
+// before play so repeated quick hits replay the sound.
+const hitSound = new Audio('audio/hit2.wav');
+hitSound.volume = 0.5;
+
+// Sound when the player loses a life
+const loseSound = new Audio('audio/Lose1.m4a');
+loseSound.volume = 0.6;
+
+// Sound when the game is over (no lives left)
+const gameOverSound = new Audio('audio/Gameover1.m4a');
+gameOverSound.volume = 0.7;
+
 // Game State - Initialized later in DOMContentLoaded
 let running = false;
 let score = 0;
@@ -213,6 +228,14 @@ function update() {
 
                 b.alive = false;
                 score += 10;
+                // Play hit sound (reset so it can replay rapidly)
+                try {
+                    hitSound.currentTime = 0;
+                    // play() returns a Promise in modern browsers — swallow errors
+                    hitSound.play().catch(() => {});
+                } catch (e) {
+                    // Audio may be unavailable in some environments; ignore
+                }
                 hit = true;
                 break; 
             }
@@ -223,6 +246,20 @@ function update() {
     // 6. Check for Miss (Ball below screen)
     if (ball.y - ball.r > H) {
         lives--;
+
+        // Play lose sound for life lost, or game over sound if no lives remain.
+        try {
+            if (lives > 0) {
+                loseSound.currentTime = 0;
+                loseSound.play().catch(() => {});
+            } else {
+                gameOverSound.currentTime = 0;
+                gameOverSound.play().catch(() => {});
+            }
+        } catch (e) {
+            // Ignore audio errors — non-fatal
+        }
+
         if (lives > 0) {
             resetBall();
         } else {
