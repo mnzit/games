@@ -1,65 +1,314 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
-
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Electron Brick Game</title>
-  <!-- Updated to Car Racing Game -->
-  <title>Electron Car Racing</title>
-  <style>
-    html,
-    body {
-      height: 100%;
-      margin: 0;
-      background: #111;
-      color: #eee;
-      font-family: Arial, Helvetica, sans-serif
-    }
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>2D Shooter Game</title>
+    <style>
+        html, body {
+            height: 100%;
+            margin: 0;
+            background: #111;
+            color: #eee;
+            font-family: 'Arial', sans-serif;
+            overflow: hidden;
+        }
 
-    #gameWrap {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      height: 100%
-    }
+        #gameWrap {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100%;
+        }
 
-    canvas {
-      background: #000;
-      border: 4px solid #222;
-      display: block
-    }
+        canvas {
+            background: #000;
+            border: 4px solid #222;
+            display: block;
+            box-shadow: 0 0 20px rgba(0, 0, 0, 0.5);
+        }
 
-    .hud {
-      margin-top: 12px;
-      display: flex;
-      gap: 18px;
-      align-items: center
-    }
+        .hud {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            display: flex;
+            justify-content: space-between;
+            padding: 20px;
+            pointer-events: none;
+        }
 
-    button {
-      padding: 6px 10px;
-      border-radius: 6px;
-      border: none;
-      background: #2b6;
-      cursor: pointer
-    }
-  </style>
+        .player-stats {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .health-container, .jetpack-container {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            background: rgba(0, 0, 0, 0.7);
+            padding: 10px;
+            border-radius: 10px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .bar-container {
+            width: 150px;
+            height: 20px;
+            background: rgba(0, 0, 0, 0.5);
+            border-radius: 10px;
+            overflow: hidden;
+        }
+
+        .bar {
+            height: 100%;
+            width: 100%;
+            transition: width 0.3s ease;
+        }
+
+        #healthBar {
+            background: linear-gradient(90deg, #f00, #f55);
+        }
+
+        #jetpackBar {
+            background: linear-gradient(90deg, #ff0, #fa0);
+        }
+
+        .weapon-hud {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            background: rgba(0, 0, 0, 0.7);
+            padding: 15px;
+            border-radius: 15px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .weapon-info {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            margin-bottom: 10px;
+        }
+
+        #weaponIcon {
+            width: 60px;
+            height: 30px;
+            object-fit: contain;
+        }
+
+        .weapon-stats {
+            color: #fff;
+            font-size: 14px;
+        }
+
+        #ammoCount {
+            font-size: 18px;
+            font-weight: bold;
+            color: #0f0;
+        }
+
+        .weapon-slots {
+            display: flex;
+            gap: 5px;
+        }
+
+        .weapon-slot {
+            width: 30px;
+            height: 30px;
+            background: rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 5px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 12px;
+            transition: all 0.3s ease;
+        }
+
+        .weapon-slot.active {
+            background: rgba(255, 255, 255, 0.3);
+            border-color: #0f0;
+        }
+
+        .score-container {
+            background: rgba(0, 0, 0, 0.7);
+            padding: 15px;
+            border-radius: 10px;
+            text-align: right;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .game-controls {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            display: flex;
+            gap: 10px;
+            pointer-events: auto;
+        }
+
+        button {
+            padding: 8px 15px;
+            border-radius: 8px;
+            border: none;
+            background: linear-gradient(to bottom, #2b6, #1a5);
+            color: white;
+            cursor: pointer;
+            font-weight: bold;
+            transition: all 0.3s ease;
+            text-transform: uppercase;
+            font-size: 12px;
+        }
+
+        button:hover {
+            background: linear-gradient(to bottom, #3c7, #2b6);
+            transform: translateY(-2px);
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
+        }
+
+        .controls-guide {
+            position: fixed;
+            bottom: 20px;
+            left: 20px;
+            background: rgba(0, 0, 0, 0.7);
+            padding: 15px;
+            border-radius: 10px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .control-item {
+            margin: 5px 0;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .key {
+            background: rgba(255, 255, 255, 0.1);
+            padding: 3px 8px;
+            border-radius: 5px;
+            font-size: 12px;
+            min-width: 20px;
+            text-align: center;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+
+        /* Effects */
+        @keyframes damage-flash {
+            0% { box-shadow: 0 0 20px #f00; }
+            100% { box-shadow: 0 0 20px rgba(0, 0, 0, 0.5); }
+        }
+
+        @keyframes heal-flash {
+            0% { box-shadow: 0 0 20px #0f0; }
+            100% { box-shadow: 0 0 20px rgba(0, 0, 0, 0.5); }
+        }
+
+        .damage-flash {
+            animation: damage-flash 0.5s ease;
+        }
+
+        .heal-flash {
+            animation: heal-flash 0.5s ease;
+        }
+
+        /* Popup Text Effects */
+        .popup-text {
+            position: absolute;
+            font-weight: bold;
+            pointer-events: none;
+            animation: float-up 1s ease-out forwards;
+        }
+
+        @keyframes float-up {
+            0% {
+                opacity: 1;
+                transform: translateY(0);
+            }
+            100% {
+                opacity: 0;
+                transform: translateY(-50px);
+            }
+        }
+        </style>
+    </style>
 </head>
 
 <body>
-  <div id="gameWrap">
-    <canvas id="game" width="720" height="480"></canvas>
-    <div class="hud">
-      <div>Score: <span id="score">0</span></div>
-      <div>Speed: <span id="speed">0</span></div>
-      <div>High: <span id="high">0</span></div>
-      <button id="restart">Restart</button>
-      <button id="toggleFull">Toggle Fullscreen</button>
-    </div>
-  </div>
-  <script src="renderer.js"></script>
-</body>
+    <div id="gameWrap">
+        <canvas id="game" width="800" height="600"></canvas>
+        
+        <!-- Main HUD -->
+        <div class="hud">
+            <div class="player-stats">
+                <div class="health-container">
+                    <div class="icon">❤️</div>
+                    <div class="bar-container">
+                        <div id="healthBar" class="bar"></div>
+                    </div>
+                </div>
+                <div class="jetpack-container">
+                    <div class="icon">🚀</div>
+                    <div class="bar-container">
+                        <div id="jetpackBar" class="bar"></div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Weapon HUD -->
+            <div class="weapon-hud">
+                <div id="currentWeapon" class="weapon-info">
+                    <img id="weaponIcon" src="" alt="Current Weapon">
+                    <div class="weapon-stats">
+                        <div id="ammoCount"></div>
+                        <div id="weaponName"></div>
+                    </div>
+                </div>
+                <div class="weapon-slots">
+                    <div class="weapon-slot" data-weapon="pistol">1</div>
+                    <div class="weapon-slot" data-weapon="rifle">2</div>
+                    <div class="weapon-slot" data-weapon="shotgun">3</div>
+                    <div class="weapon-slot" data-weapon="sniper">4</div>
+                </div>
+            </div>
 
+            <!-- Score Display -->
+            <div class="score-container">
+                <div>Score: <span id="score">0</span></div>
+                <div>High Score: <span id="high">0</span></div>
+            </div>
+
+            <!-- Game Controls -->
+            <div class="game-controls">
+                <button id="restart">Restart</button>
+                <button id="toggleFull">Fullscreen</button>
+            </div>
+        </div>
+
+        <!-- Controls Guide -->
+        <div class="controls-guide">
+            <div class="control-item">
+                <span class="key">WASD</span> Move
+            </div>
+            <div class="control-item">
+                <span class="key">SHIFT</span> Jetpack
+            </div>
+            <div class="control-item">
+                <span class="key">R</span> Reload
+            </div>
+            <div class="control-item">
+                <span class="key">1-4</span> Switch Weapons
+            </div>
+            <div class="control-item">
+                <span class="key">CLICK</span> Shoot
+            </div>
+        </div>
+    </div>
+    <script src="renderer.js"></script>
+</body>
 </html>
